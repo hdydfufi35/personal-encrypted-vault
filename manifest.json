@@ -1,7 +1,7 @@
 {
   "name": "NotyPad",
   "short_name": "NotyPad",
-  "description": "NotyPad — Personal Encrypted Notepad & Checklist Vault",
+  "description": "NotyPad - Personal Encrypted Notepad & Checklist Vault",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
