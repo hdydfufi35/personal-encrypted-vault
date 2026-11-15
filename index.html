@@ -4134,12 +4134,13 @@
       inp.click();
     };
 
-    window.handleImportFileSelected = async function (event) {
-      const file = event.target.files && event.target.files[0];
+ window.handleImportFileSelected = async function (event) {
+      const inputEl = event.target;
+      const file = inputEl && inputEl.files && inputEl.files[0];
       if (!file) return;
       if (file.size > 25 * 1024 * 1024) {
         showSettingsMessage("Backup file is too large (maximum 25 MB). Import rejected.", true);
-        event.target.value = "";
+        inputEl.value = "";
         return;
       }
 
@@ -4157,6 +4158,7 @@
           !parsed.encryption.iv
         ) {
           showSettingsMessage("Invalid or unsupported backup format. Import rejected.", true);
+          inputEl.value = "";
           return;
         }
 
@@ -4165,7 +4167,9 @@
           `File: ${file.name} • Exported: ${parsed.exportedAt || "Unknown"}. Existing notes will be safely merged without deleting any data.`;
         document.getElementById("import-mp-input").value = "";
         document.getElementById("import-confirm-panel").classList.remove("hidden");
+        inputEl.value = "";
       } catch (_) {
+        inputEl.value = "";
         showSettingsMessage("Corrupted backup JSON file. Could not read backup.", true);
       }
     };
@@ -4192,44 +4196,60 @@
         );
         const validatedBackup = validateDecryptedVault(rawDecryptedObj);
         const importedNotes = validatedBackup.notes;
-        const importedTombstones = validatedBackup.tombstones;
-
-        // Remove any tombstones that match notes being actively restored from the backup
-        const restoredIds = new Set(importedNotes.map((n) => sanitizeId(n.id)));
-        const filteredCurrentTombstones = deletedNoteTombstones.filter((t) => !restoredIds.has(sanitizeId(t.id)));
-        const filteredImportedTombstones = importedTombstones.filter((t) => !restoredIds.has(sanitizeId(t.id)));
-        deletedNoteTombstones = mergeTombstoneArrays(filteredCurrentTombstones, filteredImportedTombstones);
 
         const existingMap = new Map();
         notesList.forEach((n) => existingMap.set(sanitizeId(n.id), n));
 
+        const tombstonedIds = new Set(deletedNoteTombstones.map((t) => sanitizeId(t.id)));
+        const now = Date.now();
+
         for (const impNote of importedNotes) {
           const cleanId = sanitizeId(impNote.id);
-          if (!existingMap.has(cleanId)) {
-            existingMap.set(cleanId, { ...impNote, id: cleanId });
-          } else {
-            const curr = existingMap.get(cleanId);
+          const fp = await fingerprintNote(impNote);
+          const restoredId = cleanId + "_restored_" + fp.slice(0, 12);
+
+          const existingOrig = existingMap.get(cleanId);
+          const existingRestored = existingMap.get(restoredId);
+
+          if (existingOrig) {
             const sameContent =
-              curr.title === impNote.title &&
-              curr.content === impNote.content &&
-              JSON.stringify(curr.items || []) === JSON.stringify(impNote.items || []);
-            if (!sameContent) {
-              // Deterministic copy id: importing the same backup again never creates duplicate copies.
-              const fp = await fingerprintNote(impNote);
-              const copyId = cleanId + "_restored_" + fp.slice(0, 12);
-              if (!existingMap.has(copyId)) {
-                existingMap.set(copyId, {
-                  ...impNote,
-                  id: copyId,
-                  title: `${impNote.title} (Imported Copy)`,
-                  isPinned: false
+              existingOrig.title === impNote.title &&
+              existingOrig.content === impNote.content &&
+              JSON.stringify(existingOrig.items || []) === JSON.stringify(impNote.items || []);
+
+            if (sameContent) {
+              if (existingOrig.isTrashed && !impNote.isTrashed) {
+                existingMap.set(cleanId, {
+                  ...existingOrig,
+                  isTrashed: false,
+                  trashedAt: null,
+                  updatedAt: now
                 });
               }
+            } else if (!existingRestored && !tombstonedIds.has(restoredId)) {
+              existingMap.set(restoredId, {
+                ...impNote,
+                id: restoredId,
+                title: `${impNote.title} (Imported Copy)`,
+                isTrashed: false,
+                trashedAt: null,
+                isPinned: false,
+                updatedAt: now
+              });
             }
+          } else if (!existingRestored) {
+            deletedNoteTombstones = deletedNoteTombstones.filter((t) => sanitizeId(t.id) !== restoredId);
+            existingMap.set(restoredId, {
+              ...impNote,
+              id: restoredId,
+              isTrashed: Boolean(impNote.isTrashed),
+              updatedAt: now
+            });
           }
         }
 
         notesList = applyTombstones(Array.from(existingMap.values()), deletedNoteTombstones);
+        searchTextCache.clear();
         pendingImportData = null;
         document.getElementById("import-confirm-panel").classList.add("hidden");
         renderAllNotes();
@@ -4239,7 +4259,6 @@
         showSettingsMessage("Could not decrypt backup. Incorrect Master Password or corrupted ciphertext.", true);
       }
     };
-
     // ============================================================================
     // 18. PIN INPUT BOXES, PASSWORD TOGGLE, SERVICE WORKER, BOOT
     // ============================================================================
