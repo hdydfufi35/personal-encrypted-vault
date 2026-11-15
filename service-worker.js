@@ -3,7 +3,7 @@
  * Scope-safe cache management for GitHub Pages PWA.
  */
 const CACHE_PREFIX = "notypad-personal-encrypted-vault-";
-const CACHE_NAME = `${CACHE_PREFIX}v8`;
+const CACHE_NAME = `${CACHE_PREFIX}v9`;
 const LEGACY_NOTYPAD_CACHE_NAMES = new Set(["notypad-pwa-cache-v5"]);
 const NAVIGATION_TIMEOUT_MS = 4000;
 const TIMED_OUT = Symbol("timed-out");
